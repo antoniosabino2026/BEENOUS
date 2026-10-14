@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a1020">
+  <title>BEENOUS — Better Energy Efficiency</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#" aria-label="BEENOUS início">
+        <span class="brand-mark"><span>B</span><i></i></span>
+        <span class="brand-copy"><strong>BEENOUS</strong><small>Better Energy Efficiency</small></span>
+      </a>
+
+      <div class="nav-label">PLATAFORMA</div>
+      <nav class="nav-menu" aria-label="Navegação principal">
+        <a class="nav-link active" href="#overview"><span class="nav-icon">▦</span> Visão geral</a>
+        <a class="nav-link" href="#monitoring"><span class="nav-icon">⌁</span> Monitorização</a>
+        <a class="nav-link" href="#loads"><span class="nav-icon">ϟ</span> Gestão de cargas</a>
+        <a class="nav-link" href="#intelligence"><span class="nav-icon">◈</span> Gestão inteligente</a>
+        <a class="nav-link" href="#events"><span class="nav-icon">◷</span> Eventos e histórico</a>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="phase-card">
+          <span class="phase-dot"></span>
+          <div><strong>Fase 1 · Protótipo</strong><small>Modo de simulação</small></div>
+        </div>
+        <div class="sidebar-foot">SISTEMA DE MONITORAMENTO E GESTÃO INTELIGENTE DE ENERGIA<br><span>Versão 0.1.0</span></div>
+      </div>
+    </aside>
+
+    <main class="main-content" id="overview">
+      <header class="topbar">
+        <button class="menu-toggle" id="menuToggle" aria-label="Abrir menu">☰</button>
+        <div class="breadcrumb">Plataforma <span>/</span> <strong>Visão geral</strong></div>
+        <div class="topbar-actions">
+          <span class="simulation-pill"><span></span> SIMULAÇÃO LOCAL</span>
+          <button class="icon-button" id="resetButton" title="Repor valores demonstrativos" aria-label="Repor simulação">↻</button>
+          <div class="avatar">B</div>
+        </div>
+      </header>
+
+      <section class="page-heading">
+        <div>
+          <p class="eyebrow">PAINEL DE CONTROLO</p>
+          <h1>Visão geral <span class="heading-accent">.</span></h1>
+          <p class="page-subtitle">Acompanhe o comportamento energético do seu sistema.</p>
+        </div>
+        <div class="system-status"><span class="status-orb"></span><span><strong>Sistema operacional</strong><small>Dados demonstrativos</small></span></div>
+      </section>
+
+      <section class="metrics-grid" id="monitoring" aria-label="Indicadores energéticos">
+        <article class="metric-card">
+          <div class="metric-top"><span class="metric-icon blue">ϟ</span><span class="metric-label">TENSÃO DA REDE</span><span class="metric-more">•••</span></div>
+          <div class="metric-value"><span id="voltageValue">230</span><small>V</small></div>
+          <div class="metric-foot"><span class="mini-line blue-line">⌁⌁⌁⌁⌁</span><span class="muted">Valor simulado</span></div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-top"><span class="metric-icon green">↯</span><span class="metric-label">CORRENTE</span><span class="metric-more">•••</span></div>
+          <div class="metric-value"><span id="currentValue">1,42</span><small>A</small></div>
+          <div class="metric-foot"><span class="mini-line green-line">⌁⌁⌁⌁⌁</span><span class="muted">Estimativa local</span></div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-top"><span class="metric-icon purple">▥</span><span class="metric-label">POTÊNCIA ACTIVA</span><span class="metric-more">•••</span></div>
+          <div class="metric-value"><span id="powerValue">326</span><small>W</small></div>
+          <div class="metric-foot"><span class="mini-line purple-line">⌁⌁⌁⌁⌁</span><span class="muted">Cargas simuladas</span></div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-top"><span class="metric-icon amber">◷</span><span class="metric-label">ENERGIA DO DIA</span><span class="metric-more">•••</span></div>
+          <div class="metric-value"><span id="energyValue">2,84</span><small>kWh</small></div>
+          <div class="metric-foot"><span class="mini-line amber-line">⌁⌁⌁⌁⌁</span><span class="muted">Valor demonstrativo</span></div>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">CONSUMO ENERGÉTICO</p><h2>Perfil de consumo</h2></div>
+            <span class="select-static">Últimas 6 horas <span>⌄</span></span>
+          </div>
+          <div class="chart-legend"><span><i class="legend-dot"></i> Consumo (W)</span><span class="chart-note">Série ilustrativa</span></div>
+          <div class="chart-wrap">
+            <div class="y-labels"><span>600 W</span><span>450 W</span><span>300 W</span><span>150 W</span><span>0 W</span></div>
+            <svg class="chart" viewBox="0 0 700 210" role="img" aria-label="Gráfico ilustrativo de consumo energético">
+              <defs><linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#28dba0" stop-opacity=".25"/><stop offset="100%" stop-color="#28dba0" stop-opacity="0"/></linearGradient></defs>
+              <g class="grid-lines"><line x1="0" y1="12" x2="700" y2="12"/><line x1="0" y1="56" x2="700" y2="56"/><line x1="0" y1="100" x2="700" y2="100"/><line x1="0" y1="144" x2="700" y2="144"/><line x1="0" y1="188" x2="700" y2="188"/></g>
+              <path class="chart-area" d="M0,151 C38,145 45,121 85,130 S130,159 175,112 S230,83 265,106 S312,130 350,82 S408,67 440,89 S490,112 525,64 S582,53 610,80 S665,45 700,38 L700,188 L0,188 Z"/>
+              <path class="chart-line" d="M0,151 C38,145 45,121 85,130 S130,159 175,112 S230,83 265,106 S312,130 350,82 S408,67 440,89 S490,112 525,64 S582,53 610,80 S665,45 700,38"/>
+              <circle class="chart-point" cx="525" cy="64" r="4"/><circle class="chart-point" cx="700" cy="38" r="4"/>
+            </svg>
+          </div>
+          <div class="x-labels"><span>06:00</span><span>08:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>Agora</span></div>
+        </article>
+
+        <article class="panel source-panel">
+          <div class="panel-heading"><div><p class="eyebrow">DISTRIBUIÇÃO</p><h2>Estado do sistema</h2></div><span class="live-tag"><i></i> LOCAL</span></div>
+          <div class="source-visual">
+            <div class="donut"><div class="donut-inner"><strong id="activeLoadCount">2/3</strong><small>cargas ligadas</small></div></div>
+          </div>
+          <div class="source-stats">
+            <div><span class="source-key"><i class="source-square grid-square"></i>Rede eléctrica</span><strong>Disponível</strong></div>
+            <div><span class="source-key"><i class="source-square solar-square"></i>Fonte solar</span><strong class="muted">Não integrada</strong></div>
+            <div><span class="source-key"><i class="source-square backup-square"></i>Backup</span><strong class="muted">Fase futura</strong></div>
+          </div>
+          <p class="info-note"><span>ⓘ</span> A origem e a disponibilidade das fontes são informativas nesta simulação.</p>
+        </article>
+      </section>
+
+      <section class="section-heading" id="loads">
+        <div><p class="eyebrow">CONTROLO DO SISTEMA</p><h2>Gestão de cargas</h2><p class="section-subtitle">Teste localmente o estado de cada carga.</p></div>
+        <span class="load-summary"><span class="status-orb"></span><strong id="loadSummary">2 de 3 cargas ligadas</strong></span>
+      </section>
+
+      <section class="loads-grid">
+        <article class="load-card is-on" data-load-card="high">
+          <div class="load-card-top"><span class="load-symbol">ϟ</span><span class="priority high">PRIORIDADE ALTA</span></div>
+          <div class="load-title-row"><div><h3>Carga 01</h3><p>Iluminação essencial</p></div><span class="load-state"><i></i><span data-state-label>Ligada</span></span></div>
+          <div class="load-details"><div><span>Potência nominal</span><strong>120 W</strong></div><div><span>Grupo</span><strong>Essencial</strong></div></div>
+          <button class="load-toggle" data-load="high" aria-pressed="true"><span class="toggle-knob"></span><span data-button-label>Desligar carga</span></button>
+        </article>
+
+        <article class="load-card is-on" data-load-card="medium">
+          <div class="load-card-top"><span class="load-symbol">▤</span><span class="priority medium">PRIORIDADE MÉDIA</span></div>
+          <div class="load-title-row"><div><h3>Carga 02</h3><p>Equipamento de apoio</p></div><span class="load-state"><i></i><span data-state-label>Ligada</span></span></div>
+          <div class="load-details"><div><span>Potência nominal</span><strong>180 W</strong></div><div><span>Grupo</span><strong>Intermédio</strong></div></div>
+          <button class="load-toggle" data-load="medium" aria-pressed="true"><span class="toggle-knob"></span><span data-button-label>Desligar carga</span></button>
+        </article>
+
+        <article class="load-card" data-load-card="low">
+          <div class="load-card-top"><span class="load-symbol">⌁</span><span class="priority low">PRIORIDADE BAIXA</span></div>
+          <div class="load-title-row"><div><h3>Carga 03</h3><p>Carga não essencial</p></div><span class="load-state"><i></i><span data-state-label>Desligada</span></span></div>
+          <div class="load-details"><div><span>Potência nominal</span><strong>250 W</strong></div><div><span>Grupo</span><strong>Flexível</strong></div></div>
+          <button class="load-toggle" data-load="low" aria-pressed="false"><span class="toggle-knob"></span><span data-button-label>Ligar carga</span></button>
+        </article>
+      </section>
+
+      <section class="bottom-grid">
+        <article class="panel intelligence-panel" id="intelligence">
+          <div class="panel-heading"><div><p class="eyebrow">LÓGICA DO BEENOUS</p><h2>Gestão inteligente</h2></div><span class="beta-tag">EM DESENVOLVIMENTO</span></div>
+          <div class="logic-row"><span class="logic-icon">1</span><div><strong>Preservar cargas essenciais</strong><p>A prioridade alta é identificada como essencial.</p></div><span class="logic-state">Configurada</span></div>
+          <div class="logic-row"><span class="logic-icon">2</span><div><strong>Gerir cargas flexíveis</strong><p>As cargas média e baixa poderão ser geridas por regras futuras.</p></div><span class="logic-state pending">Por definir</span></div>
+          <div class="logic-row"><span class="logic-icon">3</span><div><strong>Resposta à falha da rede</strong><p>A estratégia de transferência e backup será definida na fase seguinte.</p></div><span class="logic-state pending">Fase futura</span></div>
+        </article>
+        <article class="panel events-panel" id="events">
+          <div class="panel-heading"><div><p class="eyebrow">ACTIVIDADE RECENTE</p><h2>Eventos do sistema</h2></div><button class="text-button" id="clearEvents">Limpar</button></div>
+          <div class="events-list" id="eventsList" aria-live="polite">
+            <div class="event-item"><span class="event-mark success">✓</span><div><strong>Simulação iniciada</strong><p>Estado demonstrativo carregado.</p></div><time>Agora</time></div>
+            <div class="event-item"><span class="event-mark success">✓</span><div><strong>Carga 01 ligada</strong><p>Prioridade alta · simulação local.</p></div><time>Agora</time></div>
+            <div class="event-item"><span class="event-mark success">✓</span><div><strong>Carga 02 ligada</strong><p>Prioridade média · simulação local.</p></div><time>Agora</time></div>
+          </div>
+        </article>
+      </section>
+
+      <footer class="footer"><span>© BEENOUS · Better Energy Efficiency</span><span><i class="footer-dot"></i> Protótipo de interface · Não ligado a equipamento real</span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
