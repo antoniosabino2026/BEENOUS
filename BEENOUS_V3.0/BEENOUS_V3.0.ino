@@ -9,7 +9,17 @@
 #include "soc/soc_caps.h"
 
 // ==================================================
-// BEENOUS V3.1 - CONFIGURAÇÃO
+// BEENOUS V3.3 - VARIAVEIS DE CALIBRACAO
+// ==================================================
+
+const float FATOR_V_POR_COUNT = 0.46232f;
+const float FATOR_MINIMO = 0.000001f;
+
+float tensaoRMS = 0.0f;
+bool tensaoCalibrada = false;
+
+// ==================================================
+// BEENOUS V3.2 - CONFIGURACAO
 // ==================================================
 
 #define ADC_PIN          34
@@ -25,10 +35,15 @@
 #define MAX_FREQ_HZ      70.0f
 
 #define HYSTERESIS       15.0f
-#define MIN_PERIODS      2
+
+#define MIN_PERIODS      5
+#define MAX_PERIODS      32
+
+#define MIN_SIGNAL_P2P  200
+#define MAX_PERIOD_CV   2.5f
 
 // ==================================================
-// ESTRUTURA DE MEDIÇÃO
+// ESTRUTURA DE MEDICAO
 // ==================================================
 
 struct MedicaoAC {
@@ -37,6 +52,10 @@ struct MedicaoAC {
   float rmsAC;
   float frequenciaHz;
 
+  float periodoMedio;
+  float desvioPadraoPeriodo;
+  float variacaoPeriodoPct;
+
   uint16_t minimo;
   uint16_t maximo;
   uint16_t picoPico;
@@ -44,26 +63,36 @@ struct MedicaoAC {
 
   uint16_t cruzamentosDetectados;
   uint16_t periodosValidos;
+  uint16_t periodosRejeitados;
 
+  bool amplitudeValida;
+  bool frequenciaCalculada;
   bool frequenciaValida;
 };
 
 // ==================================================
-// RESULTADO DO DETECTOR DE FREQUÊNCIA
+// RESULTADO DO DETECTOR DE FREQUENCIA
 // ==================================================
 
 struct ResultadoFrequencia {
 
   float frequenciaHz;
 
+  float periodoMedio;
+  float desvioPadraoPeriodo;
+  float variacaoPeriodoPct;
+
   uint16_t cruzamentosDetectados;
   uint16_t periodosValidos;
+  uint16_t periodosRejeitados;
 
+  bool amplitudeValida;
+  bool frequenciaCalculada;
   bool frequenciaValida;
 };
 
 // ==================================================
-// VARIÁVEIS GLOBAIS
+// VARIAVEIS GLOBAIS
 // ==================================================
 
 adc_continuous_handle_t adcHandle = NULL;
@@ -76,6 +105,18 @@ uint32_t sampleCount = 0;
 uint32_t totalSamples = 0;
 
 // ==================================================
+// PROTOTIPOS DAS FUNCOES
+// ==================================================
+
+void calcularTensaoRMS(float rmsADC);
+
+void apresentarResultados(const MedicaoAC &m);
+
+void processSample(uint16_t value);
+
+void initADC_DMA();
+
+// ==================================================
 // TRATAMENTO DE ERROS
 // ==================================================
 
@@ -85,7 +126,7 @@ void stopWithError(
 ) {
 
   Serial.printf(
-    "\nERRO: %s | Código: 0x%x\n",
+    "\nERRO: %s | Codigo: 0x%x\n",
     message,
     (unsigned int)error
   );
@@ -100,7 +141,7 @@ void stopWithError(
 }
 
 // ==================================================
-// INICIALIZAÇÃO ADC CONTINUOUS + DMA
+// INICIALIZACAO ADC CONTINUOUS + DMA
 // ==================================================
 
 void initADC_DMA() {
@@ -144,7 +185,7 @@ void initADC_DMA() {
 
   if (error != ESP_OK) {
     stopWithError(
-      "Falha na configuração ADC",
+      "Falha na configuracao ADC",
       error
     );
   }
@@ -164,31 +205,40 @@ void initADC_DMA() {
 }
 
 // ==================================================
-// DETECTOR DE FREQUÊNCIA V3.1
+// DETECTOR DE FREQUENCIA V3.2
 // ==================================================
 
 ResultadoFrequencia detectarFrequencia(
-  const uint16_t *samples,
+  const uint16_t *dados,
   uint32_t quantidade,
   double offsetDC,
-  float sampleRateHz
+  float sampleRateHz,
+  uint16_t picoPico
 ) {
 
   ResultadoFrequencia resultado = {};
 
   if (
-    samples == nullptr ||
+    dados == nullptr ||
     quantidade < 2 ||
     sampleRateHz <= 0
   ) {
     return resultado;
   }
 
+  // 1. VALIDACAO DA AMPLITUDE
+
+  resultado.amplitudeValida =
+    picoPico >= MIN_SIGNAL_P2P;
+
+  if (!resultado.amplitudeValida) {
+    return resultado;
+  }
+
+  // 2. LIMITES DO PERIODO
+
   const double limiarInferior =
     offsetDC - HYSTERESIS;
-
-  const double limiarSuperior =
-    offsetDC + HYSTERESIS;
 
   const double periodoMinimo =
     sampleRateHz / MAX_FREQ_HZ;
@@ -196,13 +246,18 @@ ResultadoFrequencia detectarFrequencia(
   const double periodoMaximo =
     sampleRateHz / MIN_FREQ_HZ;
 
+  // 3. VARIAVEIS DO DETECTOR
+
   bool armado = false;
   bool primeiroCruzamento = true;
 
   double ultimoCruzamento = 0.0;
-  double somaPeriodos = 0.0;
 
-  // Percorrer a janela de amostras
+  double periodos[MAX_PERIODS];
+
+  uint16_t quantidadePeriodos = 0;
+
+  // 4. PERCORRER AS AMOSTRAS
 
   for (
     uint32_t i = 1;
@@ -210,21 +265,17 @@ ResultadoFrequencia detectarFrequencia(
     i++
   ) {
 
-    double anterior = samples[i - 1];
-    double atual = samples[i];
-
-    // 1. REARMAR O DETECTOR
+    double anterior = dados[i - 1];
+    double atual = dados[i];
 
     if (atual <= limiarInferior) {
       armado = true;
     }
 
-    // 2. DETECTAR CRUZAMENTO ASCENDENTE
-
     if (
       armado &&
       anterior < offsetDC &&
-      atual >= limiarSuperior
+      atual >= offsetDC
     ) {
 
       double diferenca = atual - anterior;
@@ -233,7 +284,7 @@ ResultadoFrequencia detectarFrequencia(
         continue;
       }
 
-      // 3. INTERPOLAÇÃO DO CRUZAMENTO
+      // INTERPOLACAO LINEAR
 
       double fraccao =
         (offsetDC - anterior) / diferenca;
@@ -243,7 +294,7 @@ ResultadoFrequencia detectarFrequencia(
 
       resultado.cruzamentosDetectados++;
 
-      // 4. CALCULAR PERÍODO
+      // CALCULAR PERIODO
 
       if (!primeiroCruzamento) {
 
@@ -255,9 +306,22 @@ ResultadoFrequencia detectarFrequencia(
           periodo <= periodoMaximo
         ) {
 
-          somaPeriodos += periodo;
+          if (quantidadePeriodos < MAX_PERIODS) {
 
-          resultado.periodosValidos++;
+            periodos[quantidadePeriodos] = periodo;
+
+            quantidadePeriodos++;
+
+            resultado.periodosValidos++;
+
+          } else {
+
+            resultado.periodosRejeitados++;
+          }
+
+        } else {
+
+          resultado.periodosRejeitados++;
         }
 
       } else {
@@ -267,38 +331,85 @@ ResultadoFrequencia detectarFrequencia(
 
       ultimoCruzamento = cruzamento;
 
-      // Exigir novo rearme antes do próximo ciclo
-
       armado = false;
     }
   }
 
-  // 5. CALCULAR FREQUÊNCIA MÉDIA
+  // 5. ESTATISTICAS DOS PERIODOS
 
-  if (
-    resultado.periodosValidos >= MIN_PERIODS
+  if (quantidadePeriodos == 0) {
+    return resultado;
+  }
+
+  double somaPeriodos = 0.0;
+
+  for (
+    uint16_t i = 0;
+    i < quantidadePeriodos;
+    i++
   ) {
 
-    double periodoMedio =
-      somaPeriodos / resultado.periodosValidos;
-
-    resultado.frequenciaHz =
-      sampleRateHz / periodoMedio;
-
-    resultado.frequenciaValida =
-      resultado.frequenciaHz >= MIN_FREQ_HZ &&
-      resultado.frequenciaHz <= MAX_FREQ_HZ;
+    somaPeriodos += periodos[i];
   }
+
+  double mediaPeriodos =
+    somaPeriodos / quantidadePeriodos;
+
+  double somaDesviosQuadrados = 0.0;
+
+  for (
+    uint16_t i = 0;
+    i < quantidadePeriodos;
+    i++
+  ) {
+
+    double desvio =
+      periodos[i] - mediaPeriodos;
+
+    somaDesviosQuadrados +=
+      desvio * desvio;
+  }
+
+  double variancia =
+    somaDesviosQuadrados / quantidadePeriodos;
+
+  double desvioPadrao =
+    sqrt(variancia);
+
+  double variacaoPercentual =
+    (desvioPadrao / mediaPeriodos) * 100.0;
+
+  // 6. CALCULAR FREQUENCIA
+
+  resultado.periodoMedio = mediaPeriodos;
+
+  resultado.desvioPadraoPeriodo = desvioPadrao;
+
+  resultado.variacaoPeriodoPct = variacaoPercentual;
+
+  resultado.frequenciaHz =
+    sampleRateHz / mediaPeriodos;
+
+  resultado.frequenciaCalculada = true;
+
+  // 7. VALIDACAO FINAL
+
+  resultado.frequenciaValida =
+    resultado.amplitudeValida &&
+    resultado.periodosValidos >= MIN_PERIODS &&
+    resultado.variacaoPeriodoPct <= MAX_PERIOD_CV &&
+    resultado.frequenciaHz >= MIN_FREQ_HZ &&
+    resultado.frequenciaHz <= MAX_FREQ_HZ;
 
   return resultado;
 }
 
 // ==================================================
-// PROCESSAMENTO DA JANELA
+// CALCULO RMS E PROCESSAMENTO DA JANELA
 // ==================================================
 
 MedicaoAC processarJanela(
-  const uint16_t *samples,
+  const uint16_t *dados,
   float sampleRateHz
 ) {
 
@@ -310,15 +421,15 @@ MedicaoAC processarJanela(
   uint16_t maximo = 0;
   uint16_t saturacoes = 0;
 
-  // 1. ESTATÍSTICAS BÁSICAS
+  // 1. ESTATISTICAS BASICAS
 
   for (
-    int i = 0;
+    uint32_t i = 0;
     i < WINDOW_SAMPLES;
     i++
   ) {
 
-    uint16_t valor = samples[i];
+    uint16_t valor = dados[i];
 
     soma += valor;
 
@@ -333,47 +444,60 @@ MedicaoAC processarJanela(
   float media =
     (float)soma / WINDOW_SAMPLES;
 
-  // 2. CÁLCULO RMS AC
-  // Mantido da versão V3.0
+  // 2. CALCULO RMS AC
 
   double somaQuadrados = 0.0;
 
   for (
-    int i = 0;
+    uint32_t i = 0;
     i < WINDOW_SAMPLES;
     i++
   ) {
 
-    float componenteAC =
-      samples[i] - media;
+    double componenteAC =
+      dados[i] - media;
 
     somaQuadrados +=
-      (double)componenteAC * componenteAC;
+      componenteAC * componenteAC;
   }
 
   float rms = sqrt(
     somaQuadrados / WINDOW_SAMPLES
   );
 
-  // 3. DETECÇÃO DE FREQUÊNCIA V3.1
+  uint16_t picoPico = maximo - minimo;
+
+  // 3. DETECCAO DE FREQUENCIA
 
   ResultadoFrequencia freq =
     detectarFrequencia(
-      samples,
+      dados,
       WINDOW_SAMPLES,
       media,
-      sampleRateHz
+      sampleRateHz,
+      picoPico
     );
 
-  // 4. ORGANIZAÇÃO DOS RESULTADOS
+  // 4. ORGANIZAR RESULTADOS
 
   resultado.offsetDC = media;
   resultado.rmsAC = rms;
-  resultado.frequenciaHz = freq.frequenciaHz;
+
+  resultado.frequenciaHz =
+    freq.frequenciaHz;
+
+  resultado.periodoMedio =
+    freq.periodoMedio;
+
+  resultado.desvioPadraoPeriodo =
+    freq.desvioPadraoPeriodo;
+
+  resultado.variacaoPeriodoPct =
+    freq.variacaoPeriodoPct;
 
   resultado.minimo = minimo;
   resultado.maximo = maximo;
-  resultado.picoPico = maximo - minimo;
+  resultado.picoPico = picoPico;
 
   resultado.saturacoes = saturacoes;
 
@@ -383,6 +507,15 @@ MedicaoAC processarJanela(
   resultado.periodosValidos =
     freq.periodosValidos;
 
+  resultado.periodosRejeitados =
+    freq.periodosRejeitados;
+
+  resultado.amplitudeValida =
+    freq.amplitudeValida;
+
+  resultado.frequenciaCalculada =
+    freq.frequenciaCalculada;
+
   resultado.frequenciaValida =
     freq.frequenciaValida;
 
@@ -390,17 +523,42 @@ MedicaoAC processarJanela(
 }
 
 // ==================================================
-// APRESENTAÇÃO DOS RESULTADOS
+// CALCULO DA TENSAO RMS - V3.3
+// ==================================================
+
+void calcularTensaoRMS(float rmsADC) {
+
+  if (FATOR_V_POR_COUNT > FATOR_MINIMO) {
+
+    tensaoRMS =
+      rmsADC * FATOR_V_POR_COUNT;
+
+    tensaoCalibrada = true;
+
+  } else {
+
+    tensaoRMS = 0.0f;
+
+    tensaoCalibrada = false;
+  }
+}
+
+// ==================================================
+// APRESENTACAO DOS RESULTADOS - V3.3
 // ==================================================
 
 void apresentarResultados(
   const MedicaoAC &m
 ) {
 
+  // CALCULO DA TENSAO
+
+  calcularTensaoRMS(m.rmsAC);
+
   Serial.println();
 
   Serial.println(
-    "========== BEENOUS V3.1 =========="
+    "========== BEENOUS V3.3 =========="
   );
 
   Serial.printf(
@@ -409,12 +567,12 @@ void apresentarResultados(
   );
 
   Serial.printf(
-    "Mínimo ADC: %u\n",
+    "Minimo ADC: %u\n",
     m.minimo
   );
 
   Serial.printf(
-    "Máximo ADC: %u\n",
+    "Maximo ADC: %u\n",
     m.maximo
   );
 
@@ -424,9 +582,25 @@ void apresentarResultados(
   );
 
   Serial.printf(
-    "RMS AC: %.2f\n",
+    "RMS AC: %.2f counts\n",
     m.rmsAC
   );
+
+  // TENSAO RMS
+
+  if (tensaoCalibrada) {
+
+    Serial.printf(
+      "Tensao RMS: %.2f V\n",
+      tensaoRMS
+    );
+
+  } else {
+
+    Serial.println(
+      "Tensao RMS: NAO CALIBRADA"
+    );
+  }
 
   Serial.printf(
     "Pico a pico: %u\n",
@@ -434,7 +608,7 @@ void apresentarResultados(
   );
 
   Serial.printf(
-    "Saturações: %u\n",
+    "Saturacoes: %u\n",
     m.saturacoes
   );
 
@@ -443,44 +617,82 @@ void apresentarResultados(
     SAMPLE_RATE
   );
 
+  Serial.println(
+    "----------------------------------"
+  );
+
   Serial.printf(
     "Cruzamentos detectados: %u\n",
     m.cruzamentosDetectados
   );
 
   Serial.printf(
-    "Períodos válidos: %u\n",
+    "Periodos validos: %u\n",
     m.periodosValidos
   );
 
-  if (m.frequenciaValida) {
+  Serial.printf(
+    "Periodos rejeitados: %u\n",
+    m.periodosRejeitados
+  );
+
+  Serial.printf(
+    "Amplitude do sinal: %s\n",
+    m.amplitudeValida ? "VALIDA" : "INSUFICIENTE"
+  );
+
+  if (m.frequenciaCalculada) {
 
     Serial.printf(
-      "Frequência estimada: %.2f Hz\n",
-      m.frequenciaHz
+      "Periodo medio: %.3f amostras\n",
+      m.periodoMedio
     );
 
-    Serial.println(
-      "Frequência: VALIDADA"
+    Serial.printf(
+      "Desvio padrao: %.3f amostras\n",
+      m.desvioPadraoPeriodo
+    );
+
+    Serial.printf(
+      "Variacao dos periodos: %.2f %%\n",
+      m.variacaoPeriodoPct
+    );
+
+    Serial.printf(
+      "Frequencia estimada: %.2f Hz\n",
+      m.frequenciaHz
     );
 
   } else {
 
     Serial.println(
-      "Frequência: NÃO VALIDADA"
+      "Frequencia estimada: INDISPONIVEL"
+    );
+  }
+
+  if (m.frequenciaValida) {
+
+    Serial.println(
+      "Frequencia: VALIDADA"
+    );
+
+  } else {
+
+    Serial.println(
+      "Frequencia: NAO VALIDADA"
     );
   }
 
   if (m.saturacoes > 0) {
 
     Serial.println(
-      "Estado: SATURAÇÃO DETECTADA"
+      "Estado ADC: SATURACAO DETECTADA"
     );
 
   } else {
 
     Serial.println(
-      "Estado: SEM SATURAÇÃO"
+      "Estado ADC: SEM SATURACAO"
     );
   }
 
@@ -495,7 +707,7 @@ void apresentarResultados(
 }
 
 // ==================================================
-// RECEPÇÃO DE AMOSTRAS
+// RECEPCAO DE AMOSTRAS
 // ==================================================
 
 void processSample(uint16_t value) {
@@ -517,8 +729,6 @@ void processSample(uint16_t value) {
 
     apresentarResultados(medicao);
 
-    // Preparar próxima janela
-
     sampleCount = 0;
   }
 }
@@ -536,11 +746,11 @@ void setup() {
   Serial.println();
 
   Serial.println(
-    "BEENOUS V3.1"
+    "BEENOUS V3.3"
   );
 
   Serial.println(
-    "Sistema de medição AC"
+    "Sistema de medicao AC"
   );
 
   Serial.println(
@@ -555,6 +765,7 @@ void setup() {
 // ==================================================
 
 void loop() {
+
 
   uint32_t bytesRead = 0;
 
@@ -583,7 +794,7 @@ void loop() {
   ) {
 
     Serial.println(
-      "Bloco ADC com tamanho inválido."
+      "Bloco ADC com tamanho invalido."
     );
 
     return;
