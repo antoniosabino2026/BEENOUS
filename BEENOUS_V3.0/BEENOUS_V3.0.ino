@@ -9,7 +9,7 @@
 #include "soc/soc_caps.h"
 
 // ==================================================
-// BEENOUS V3.0 - CONFIGURAÇÃO
+// BEENOUS V3.1 - CONFIGURAÇÃO
 // ==================================================
 
 #define ADC_PIN          34
@@ -25,12 +25,14 @@
 #define MAX_FREQ_HZ      70.0f
 
 #define HYSTERESIS       15.0f
+#define MIN_PERIODS      2
 
 // ==================================================
 // ESTRUTURA DE MEDIÇÃO
 // ==================================================
 
 struct MedicaoAC {
+
   float offsetDC;
   float rmsAC;
   float frequenciaHz;
@@ -39,7 +41,23 @@ struct MedicaoAC {
   uint16_t maximo;
   uint16_t picoPico;
   uint16_t saturacoes;
-  uint16_t ciclosDetectados;
+
+  uint16_t cruzamentosDetectados;
+  uint16_t periodosValidos;
+
+  bool frequenciaValida;
+};
+
+// ==================================================
+// RESULTADO DO DETECTOR DE FREQUÊNCIA
+// ==================================================
+
+struct ResultadoFrequencia {
+
+  float frequenciaHz;
+
+  uint16_t cruzamentosDetectados;
+  uint16_t periodosValidos;
 
   bool frequenciaValida;
 };
@@ -61,7 +79,10 @@ uint32_t totalSamples = 0;
 // TRATAMENTO DE ERROS
 // ==================================================
 
-void stopWithError(const char *message, esp_err_t error) {
+void stopWithError(
+  const char *message,
+  esp_err_t error
+) {
 
   Serial.printf(
     "\nERRO: %s | Código: 0x%x\n",
@@ -95,7 +116,10 @@ void initADC_DMA() {
   );
 
   if (error != ESP_OK) {
-    stopWithError("Falha ao criar ADC DMA", error);
+    stopWithError(
+      "Falha ao criar ADC DMA",
+      error
+    );
   }
 
   adc_digi_pattern_config_t adcPattern = {};
@@ -119,16 +143,154 @@ void initADC_DMA() {
   );
 
   if (error != ESP_OK) {
-    stopWithError("Falha na configuração ADC", error);
+    stopWithError(
+      "Falha na configuração ADC",
+      error
+    );
   }
 
   error = adc_continuous_start(adcHandle);
 
   if (error != ESP_OK) {
-    stopWithError("Falha ao iniciar ADC DMA", error);
+    stopWithError(
+      "Falha ao iniciar ADC DMA",
+      error
+    );
   }
 
-  Serial.println("ADC Continuous + DMA iniciado.");
+  Serial.println(
+    "ADC Continuous + DMA iniciado."
+  );
+}
+
+// ==================================================
+// DETECTOR DE FREQUÊNCIA V3.1
+// ==================================================
+
+ResultadoFrequencia detectarFrequencia(
+  const uint16_t *samples,
+  uint32_t quantidade,
+  double offsetDC,
+  float sampleRateHz
+) {
+
+  ResultadoFrequencia resultado = {};
+
+  if (
+    samples == nullptr ||
+    quantidade < 2 ||
+    sampleRateHz <= 0
+  ) {
+    return resultado;
+  }
+
+  const double limiarInferior =
+    offsetDC - HYSTERESIS;
+
+  const double limiarSuperior =
+    offsetDC + HYSTERESIS;
+
+  const double periodoMinimo =
+    sampleRateHz / MAX_FREQ_HZ;
+
+  const double periodoMaximo =
+    sampleRateHz / MIN_FREQ_HZ;
+
+  bool armado = false;
+  bool primeiroCruzamento = true;
+
+  double ultimoCruzamento = 0.0;
+  double somaPeriodos = 0.0;
+
+  // Percorrer a janela de amostras
+
+  for (
+    uint32_t i = 1;
+    i < quantidade;
+    i++
+  ) {
+
+    double anterior = samples[i - 1];
+    double atual = samples[i];
+
+    // 1. REARMAR O DETECTOR
+
+    if (atual <= limiarInferior) {
+      armado = true;
+    }
+
+    // 2. DETECTAR CRUZAMENTO ASCENDENTE
+
+    if (
+      armado &&
+      anterior < offsetDC &&
+      atual >= limiarSuperior
+    ) {
+
+      double diferenca = atual - anterior;
+
+      if (diferenca <= 0) {
+        continue;
+      }
+
+      // 3. INTERPOLAÇÃO DO CRUZAMENTO
+
+      double fraccao =
+        (offsetDC - anterior) / diferenca;
+
+      double cruzamento =
+        (double)(i - 1) + fraccao;
+
+      resultado.cruzamentosDetectados++;
+
+      // 4. CALCULAR PERÍODO
+
+      if (!primeiroCruzamento) {
+
+        double periodo =
+          cruzamento - ultimoCruzamento;
+
+        if (
+          periodo >= periodoMinimo &&
+          periodo <= periodoMaximo
+        ) {
+
+          somaPeriodos += periodo;
+
+          resultado.periodosValidos++;
+        }
+
+      } else {
+
+        primeiroCruzamento = false;
+      }
+
+      ultimoCruzamento = cruzamento;
+
+      // Exigir novo rearme antes do próximo ciclo
+
+      armado = false;
+    }
+  }
+
+  // 5. CALCULAR FREQUÊNCIA MÉDIA
+
+  if (
+    resultado.periodosValidos >= MIN_PERIODS
+  ) {
+
+    double periodoMedio =
+      somaPeriodos / resultado.periodosValidos;
+
+    resultado.frequenciaHz =
+      sampleRateHz / periodoMedio;
+
+    resultado.frequenciaValida =
+      resultado.frequenciaHz >= MIN_FREQ_HZ &&
+      resultado.frequenciaHz <= MAX_FREQ_HZ;
+  }
+
+  return resultado;
 }
 
 // ==================================================
@@ -150,7 +312,11 @@ MedicaoAC processarJanela(
 
   // 1. ESTATÍSTICAS BÁSICAS
 
-  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+  for (
+    int i = 0;
+    i < WINDOW_SAMPLES;
+    i++
+  ) {
 
     uint16_t valor = samples[i];
 
@@ -164,15 +330,22 @@ MedicaoAC processarJanela(
     }
   }
 
-  float media = (float)soma / WINDOW_SAMPLES;
+  float media =
+    (float)soma / WINDOW_SAMPLES;
 
   // 2. CÁLCULO RMS AC
+  // Mantido da versão V3.0
 
   double somaQuadrados = 0.0;
 
-  for (int i = 0; i < WINDOW_SAMPLES; i++) {
+  for (
+    int i = 0;
+    i < WINDOW_SAMPLES;
+    i++
+  ) {
 
-    float componenteAC = samples[i] - media;
+    float componenteAC =
+      samples[i] - media;
 
     somaQuadrados +=
       (double)componenteAC * componenteAC;
@@ -182,102 +355,36 @@ MedicaoAC processarJanela(
     somaQuadrados / WINDOW_SAMPLES
   );
 
-  // 3. ESTIMATIVA DA FREQUÊNCIA
+  // 3. DETECÇÃO DE FREQUÊNCIA V3.1
 
-  bool armado = false;
-  bool primeiroCruzamento = true;
+  ResultadoFrequencia freq =
+    detectarFrequencia(
+      samples,
+      WINDOW_SAMPLES,
+      media,
+      sampleRateHz
+    );
 
-  float ultimoCruzamento = 0.0f;
-
-  double somaPeriodos = 0.0;
-
-  uint16_t periodosValidos = 0;
-
-  for (int i = 1; i < WINDOW_SAMPLES; i++) {
-
-    float anterior = samples[i - 1];
-    float atual = samples[i];
-
-    if (atual < media - HYSTERESIS) {
-      armado = true;
-    }
-
-    if (
-      armado &&
-      anterior < media &&
-      atual >= media
-    ) {
-
-      float denominador = atual - anterior;
-
-      if (denominador > 0) {
-
-        float fracao =
-          (media - anterior) / denominador;
-
-        float cruzamento =
-          (i - 1) + fracao;
-
-        if (!primeiroCruzamento) {
-
-          float periodo =
-            cruzamento - ultimoCruzamento;
-
-          if (periodo > 0 && sampleRateHz > 0) {
-
-            float frequenciaInstantanea =
-              sampleRateHz / periodo;
-
-            if (
-              frequenciaInstantanea >= MIN_FREQ_HZ &&
-              frequenciaInstantanea <= MAX_FREQ_HZ
-            ) {
-
-              somaPeriodos += periodo;
-              periodosValidos++;
-            }
-          }
-
-        } else {
-
-          primeiroCruzamento = false;
-        }
-
-        ultimoCruzamento = cruzamento;
-        armado = false;
-      }
-    }
-  }
-
-  // 4. FREQUÊNCIA MÉDIA
-
-  float frequencia = 0.0f;
-  bool frequenciaValida = false;
-
-  if (periodosValidos >= 2 && sampleRateHz > 0) {
-
-    float periodoMedio =
-      somaPeriodos / periodosValidos;
-
-    frequencia = sampleRateHz / periodoMedio;
-
-    frequenciaValida = true;
-  }
-
-  // 5. ORGANIZAÇÃO DOS RESULTADOS
+  // 4. ORGANIZAÇÃO DOS RESULTADOS
 
   resultado.offsetDC = media;
   resultado.rmsAC = rms;
-  resultado.frequenciaHz = frequencia;
+  resultado.frequenciaHz = freq.frequenciaHz;
 
   resultado.minimo = minimo;
   resultado.maximo = maximo;
   resultado.picoPico = maximo - minimo;
 
   resultado.saturacoes = saturacoes;
-  resultado.ciclosDetectados = periodosValidos;
 
-  resultado.frequenciaValida = frequenciaValida;
+  resultado.cruzamentosDetectados =
+    freq.cruzamentosDetectados;
+
+  resultado.periodosValidos =
+    freq.periodosValidos;
+
+  resultado.frequenciaValida =
+    freq.frequenciaValida;
 
   return resultado;
 }
@@ -286,26 +393,64 @@ MedicaoAC processarJanela(
 // APRESENTAÇÃO DOS RESULTADOS
 // ==================================================
 
-void apresentarResultados(const MedicaoAC &m) {
+void apresentarResultados(
+  const MedicaoAC &m
+) {
 
   Serial.println();
-  Serial.println("========== BEENOUS V3.0 ==========");
 
-  Serial.printf("Amostras: %u\n", WINDOW_SAMPLES);
+  Serial.println(
+    "========== BEENOUS V3.1 =========="
+  );
 
-  Serial.printf("Mínimo ADC: %u\n", m.minimo);
-  Serial.printf("Máximo ADC: %u\n", m.maximo);
+  Serial.printf(
+    "Amostras: %u\n",
+    WINDOW_SAMPLES
+  );
 
-  Serial.printf("Offset DC: %.2f\n", m.offsetDC);
-  Serial.printf("RMS AC: %.2f\n", m.rmsAC);
+  Serial.printf(
+    "Mínimo ADC: %u\n",
+    m.minimo
+  );
 
-  Serial.printf("Pico a pico: %u\n", m.picoPico);
+  Serial.printf(
+    "Máximo ADC: %u\n",
+    m.maximo
+  );
 
-  Serial.printf("Saturações: %u\n", m.saturacoes);
+  Serial.printf(
+    "Offset DC: %.2f\n",
+    m.offsetDC
+  );
+
+  Serial.printf(
+    "RMS AC: %.2f\n",
+    m.rmsAC
+  );
+
+  Serial.printf(
+    "Pico a pico: %u\n",
+    m.picoPico
+  );
+
+  Serial.printf(
+    "Saturações: %u\n",
+    m.saturacoes
+  );
 
   Serial.printf(
     "Taxa configurada: %d amostras/s\n",
     SAMPLE_RATE
+  );
+
+  Serial.printf(
+    "Cruzamentos detectados: %u\n",
+    m.cruzamentosDetectados
+  );
+
+  Serial.printf(
+    "Períodos válidos: %u\n",
+    m.periodosValidos
   );
 
   if (m.frequenciaValida) {
@@ -315,20 +460,28 @@ void apresentarResultados(const MedicaoAC &m) {
       m.frequenciaHz
     );
 
-    Serial.printf(
-      "Períodos válidos: %u\n",
-      m.ciclosDetectados
+    Serial.println(
+      "Frequência: VALIDADA"
     );
 
   } else {
 
-    Serial.println("Frequência: não validada");
+    Serial.println(
+      "Frequência: NÃO VALIDADA"
+    );
   }
 
   if (m.saturacoes > 0) {
-    Serial.println("Estado: SATURAÇÃO DETECTADA");
+
+    Serial.println(
+      "Estado: SATURAÇÃO DETECTADA"
+    );
+
   } else {
-    Serial.println("Estado: SEM SATURAÇÃO");
+
+    Serial.println(
+      "Estado: SEM SATURAÇÃO"
+    );
   }
 
   Serial.printf(
@@ -336,7 +489,9 @@ void apresentarResultados(const MedicaoAC &m) {
     (unsigned long)totalSamples
   );
 
-  Serial.println("==================================");
+  Serial.println(
+    "=================================="
+  );
 }
 
 // ==================================================
@@ -379,9 +534,18 @@ void setup() {
   delay(1000);
 
   Serial.println();
-  Serial.println("BEENOUS V3.0");
-  Serial.println("Sistema de medição AC");
-  Serial.println("------------------------------");
+
+  Serial.println(
+    "BEENOUS V3.1"
+  );
+
+  Serial.println(
+    "Sistema de medição AC"
+  );
+
+  Serial.println(
+    "------------------------------"
+  );
 
   initADC_DMA();
 }
@@ -407,14 +571,21 @@ void loop() {
   }
 
   if (error != ESP_OK) {
-    stopWithError("Erro na leitura ADC DMA", error);
+
+    stopWithError(
+      "Erro na leitura ADC DMA",
+      error
+    );
   }
 
   if (
     bytesRead % SOC_ADC_DIGI_RESULT_BYTES != 0
   ) {
 
-    Serial.println("Bloco ADC com tamanho inválido.");
+    Serial.println(
+      "Bloco ADC com tamanho inválido."
+    );
+
     return;
   }
 
@@ -428,6 +599,7 @@ void loop() {
       (adc_digi_output_data_t *)&dmaBuffer[i];
 
     uint16_t value = data->type1.data;
+
     uint8_t channel = data->type1.channel;
 
     if (channel == ADC_CHANNEL) {
@@ -435,4 +607,3 @@ void loop() {
     }
   }
 }
-
